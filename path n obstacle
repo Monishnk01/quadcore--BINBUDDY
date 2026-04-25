@@ -1,0 +1,170 @@
+// ==========================================
+// PINS & CONNECTIONS
+// ==========================================
+// --- Motor A (Left Wheel) ---
+const int enA = 9;  
+const int in1 = 8;
+const int in2 = 10;
+
+// --- Motor B (Right Wheel) ---
+const int in3 = 7;
+const int in4 = 6;
+const int enB = 5;  
+
+// --- Ultrasonic Sensor ---
+const int trigPin = 11;  
+const int echoPin = 12;  
+
+// ==========================================
+// SETTINGS & CALIBRATION
+// ==========================================
+// ZERO CURVATURE CALIBRATION:
+// If the robot drifts right, lower SPEED_LEFT. If it drifts left, lower SPEED_RIGHT.
+const int SPEED_LEFT = 90;   
+const int SPEED_RIGHT = 90;  
+
+// TIME SETTINGS (in milliseconds):
+const unsigned long TRAVEL_TIME = 12000;  // 12 seconds of movement
+const unsigned long PAUSE_TIME = 10000;   // 10 seconds of paused waiting
+const int OBSTACLE_DIST = 20;             // Stop if obstacle is <= 10 cm
+
+// ==========================================
+// STATE MACHINE VARIABLES
+// ==========================================
+enum State { FWD, PAUSED_FWD, TRANSITION, REV, PAUSED_REV, DONE };
+State currentState = FWD;
+
+unsigned long moveStartTime = 0;
+unsigned long timeRemaining = TRAVEL_TIME;
+unsigned long pauseStartTime = 0;
+
+void setup() {
+  Serial.begin(9600); 
+  
+  pinMode(enA, OUTPUT); pinMode(in1, OUTPUT); pinMode(in2, OUTPUT);
+  pinMode(enB, OUTPUT); pinMode(in3, OUTPUT); pinMode(in4, OUTPUT);
+  pinMode(trigPin, OUTPUT); pinMode(echoPin, INPUT);
+
+  // Start the timer for the very first movement
+  moveStartTime = millis(); 
+}
+
+void loop() {
+  // If the robot has finished its entire forward and backward trip, stop completely.
+  if (currentState == DONE) return; 
+
+  // ---------------------------------------------------------
+  // 1. CHECK FOR OBSTACLE (Only active while moving)
+  // ---------------------------------------------------------
+  if (currentState == FWD || currentState == REV) {
+    long distance = getDistance();
+    
+    // If an object is detected within 10cm
+    if (distance > 0 && distance <= OBSTACLE_DIST) {
+      
+      // Calculate how much time we spent driving before we were interrupted
+      unsigned long timeSpent = millis() - moveStartTime;
+      
+      // Subtract that from our remaining travel time (THIS PAUSES THE TIMER)
+      timeRemaining = timeRemaining - timeSpent; 
+      
+      // Start the 10-second pause clock
+      pauseStartTime = millis(); 
+      stopMotors();
+      
+      // Remember which direction we were going so we can resume it later
+      if (currentState == FWD) currentState = PAUSED_FWD;
+      else currentState = PAUSED_REV;
+      
+      Serial.println("Obstacle detected! Pausing for 10 seconds...");
+      return; // Skip the rest of the loop for now
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 2. HANDLE CURRENT BEHAVIOR
+  // ---------------------------------------------------------
+  
+  // -- PAUSED STATE --
+  if (currentState == PAUSED_FWD || currentState == PAUSED_REV) {
+    // Wait for the 10 seconds to finish
+    if (millis() - pauseStartTime >= PAUSE_TIME) {
+      Serial.println("10 seconds over. Resuming...");
+      moveStartTime = millis(); // Restart the travel stopwatch
+      
+      // Go back to whichever direction we were moving
+      if (currentState == PAUSED_FWD) currentState = FWD;
+      else currentState = REV;
+    }
+  }
+  
+  // -- FORWARD STATE --
+  else if (currentState == FWD) {
+    moveForward();
+    // Check if we have completed the total 12 seconds of forward time
+    if (millis() - moveStartTime >= timeRemaining) {
+      stopMotors();
+      currentState = TRANSITION; 
+      moveStartTime = millis(); // Reuse this variable for the transition delay
+    }
+  }
+  
+  // -- TRANSITION STATE (Brief stop before reversing to protect motors) --
+  else if (currentState == TRANSITION) {
+    if (millis() - moveStartTime >= 1000) {  // 1-second stop
+      timeRemaining = TRAVEL_TIME;           // Reset the timer to 12s for the trip back
+      moveStartTime = millis();
+      currentState = REV;
+    }
+  }
+  
+  // -- REVERSE STATE --
+  else if (currentState == REV) {
+    moveReverse();
+    // Check if we have completed the total 12 seconds of backward time
+    if (millis() - moveStartTime >= timeRemaining) {
+      stopMotors();
+      currentState = DONE;             
+    }
+  }
+}
+
+// ==========================================
+// HELPER FUNCTIONS
+// ==========================================
+
+long getDistance() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  
+  // 30-millisecond timeout prevents the code from freezing
+  long duration = pulseIn(echoPin, HIGH, 30000); 
+  if (duration == 0) return 999; 
+  return duration * 0.034 / 2; 
+}
+
+void moveForward() {
+  digitalWrite(in1, HIGH); digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW);  digitalWrite(in4, HIGH); 
+  
+  analogWrite(enA, SPEED_LEFT);
+  analogWrite(enB, SPEED_RIGHT);
+}
+
+void moveReverse() {
+  digitalWrite(in1, LOW);  digitalWrite(in2, HIGH);
+  digitalWrite(in3, HIGH); digitalWrite(in4, LOW);  
+  
+  analogWrite(enA, SPEED_LEFT);
+  analogWrite(enB, SPEED_RIGHT);
+}
+
+void stopMotors() {
+  digitalWrite(in1, LOW); digitalWrite(in2, LOW);
+  digitalWrite(in3, LOW); digitalWrite(in4, LOW);
+  analogWrite(enA, 0);    analogWrite(enB, 0);
+}
+// === END OF CODE ===
