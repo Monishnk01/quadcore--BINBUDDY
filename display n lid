@@ -1,0 +1,78 @@
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
+#include <Servo.h>
+
+// --- SETTINGS ---
+const int trigPin = 12;
+const int echoPin = 11;
+const int servoPin = 9;
+const int threshold = 20; 
+
+// Change 0x27 to 0x3F if your LCD address is different
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+Servo lidServo;
+
+void setup() {
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  
+  lcd.init();
+  lcd.backlight();
+  
+  lidServo.attach(servoPin);
+  lidServo.write(0); // Start Closed at 0 degrees
+  
+  lcd.clear();
+  lcd.print("System Ready");
+  delay(1500);
+}
+
+void loop() {
+  int distance = readDistance();
+
+  if (distance > 0 && distance < threshold) {
+    // 1. OPENING
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("Opening Lid...");
+    lidServo.write(180); // <--- Changed to 180 degrees
+    
+    // 2. WAIT (10 Seconds)
+    for(int i = 10; i > 0; i--) {
+      lcd.setCursor(0,1);
+      lcd.print("Closing in: ");
+      lcd.print(i);
+      lcd.print("s ");
+      delay(1000);
+    }
+
+    // 3. CLOSING
+    lcd.clear();
+    lcd.print("Closing Lid...");
+    lidServo.write(0); // Return to 0 degrees
+    delay(1000);
+
+    // 4. THANK YOU
+    lcd.clear();
+    lcd.setCursor(0,0);
+    lcd.print("   Thank You!   ");
+    delay(2000);
+    lcd.clear();
+  } else {
+    // 5. IDLE
+    lcd.setCursor(0, 0);
+    lcd.print("    USE ME    ");
+    delay(100); 
+  }
+}
+
+int readDistance() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+  long duration = pulseIn(echoPin, HIGH);
+  int cm = duration * 0.034 / 2;
+  return cm;
+}
